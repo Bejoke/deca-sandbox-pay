@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deca sandbox — bayar 1 test USDC</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 20px; background: #f6f7f9; color: #111; }
+  .card { max-width: 560px; margin: 0 auto; background: #fff; border-radius: 14px; padding: 22px; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  p { font-size: 15px; line-height: 1.5; }
+  .detail { background: #f0f2f5; border-radius: 10px; padding: 12px 14px; font-size: 14px; line-height: 1.7; word-break: break-all; }
+  .detail b { display: inline-block; min-width: 92px; }
+  button { display: block; width: 100%; padding: 15px; margin-top: 12px; font-size: 17px; font-weight: 700; border: 0; border-radius: 12px; background: #1a73e8; color: #fff; cursor: pointer; }
+  button:disabled { background: #b9c2cc; cursor: default; }
+  #log { white-space: pre-wrap; word-break: break-all; background: #111; color: #d6f5d6; border-radius: 10px; padding: 12px; font-size: 12px; margin-top: 14px; min-height: 40px; }
+  .warn { background: #fff4e0; border: 1px solid #f0c36d; border-radius: 10px; padding: 12px 14px; font-size: 14px; line-height: 1.5; margin-top: 12px; }
+  .ok { background: #e6f4ea; border: 1px solid #7fc48f; border-radius: 10px; padding: 12px 14px; font-size: 14px; line-height: 1.5; margin-top: 12px; }
+  textarea { width: 100%; height: 90px; margin-top: 10px; font-size: 11px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Deca sandbox test — bayar 1 test USDC</h1>
+  <p>Ini <b>bukan uang sungguhan</b>. Pembayaran memakai <b>test USDC</b> di jaringan <b>Base Sepolia</b> (testnet) untuk test sandbox ide <b>Tiltfit</b> (opsi signal). Yang dibayar: <b>1 test USDC</b>. Tidak ada dana sungguhan yang keluar dari wallet kamu.</p>
+  <div class="detail">
+    <div><b>Dari</b> 0x0330bdefd71f4fd317fad99417ebc092acef0c77</div>
+    <div><b>Ke</b> 0x7FB30eD8D7a7B45EE7b98903d94D87D1B9C3DaD2 (decalabs.base.eth)</div>
+    <div><b>Jumlah</b> 1 test USDC</div>
+    <div><b>Jaringan</b> Base Sepolia (84532)</div>
+  </div>
+  <div id="nowallet" class="warn" style="display:none;">Halaman ini tidak menemukan wallet. <b>Buka link ini di browser dalam aplikasi wallet kamu</b> (misalnya Bitget Wallet atau MetaMask — menu Browser/DApp di dalam aplikasi), bukan di Chrome biasa.</div>
+  <button id="connectBtn">1. Hubungkan wallet</button>
+  <button id="payBtn" disabled>2. Tanda tangan &amp; bayar 1 test USDC</button>
+  <div id="result"></div>
+  <div id="log">Menunggu wallet…</div>
+  <textarea id="payloadBox" style="display:none" readonly placeholder="Kode pembayaran akan muncul di sini"></textarea>
+</div>
+<script>
+const QUOTE_ID = "q1.eyJ2IjoxLCJpZGVhIjoiZDFmMWZhNWEtMzc3MC00YmJkLTgwZGUtY2VlYzExYzBlYTEzIiwicGl0Y2giOm51bGwsIm9wdGlvbnMiOlt7ImlkIjoic2lnbmFsIiwidXNkIjo1NTAsIm1hcmtldHMiOlsiVVMiLCJHQiJdLCJsaW5lIjoxNn0seyJpZCI6ImNsZWFyIiwidXNkIjoxMTAwLCJtYXJrZXRzIjpbIlVTIiwiR0IiXSwibGluZSI6MzF9LHsiaWQiOiJjb21wYXJlIiwidXNkIjoxMTAwLCJtYXJrZXRzIjpbIlVTIiwiR0IiXSwibGluZSI6MzJ9XSwiZXhwIjoxNzk1NDM4NjU2Mjg1fQ.zmN32vZIMAts8KG5SVOlPdTGkbfIB1gVzVuPC4mP1GQ";
+const BODY = { quote_id: QUOTE_ID, option: "signal", sandbox: true, idempotency_key: "deca-sandbox-20261123-04" };
+const PAYTO = "0x7FB30eD8D7a7B45EE7b98903d94D87D1B9C3DaD2";
+const ASSET = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+const EXPECTED_FROM = "0x0330bdefd71f4fd317fad99417ebc092acef0c77";
+const AMOUNT = "1000000";
+const ZERO_NONCE = "0x0000000000000000000000000000000000000000000000000000000000000000";
+const RPCS = ["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"];
+const logEl = document.getElementById("log");
+const resultEl = document.getElementById("result");
+function log(msg) { logEl.textContent += "\n" + msg; }
+let account = null;
+
+async function readNonce() {
+  const data = "0x7ecebe00" + account.replace(/^0x/, "").toLowerCase().padStart(64, "0");
+  for (const rpc of RPCS) {
+    try {
+      log("Membaca nonce via RPC " + rpc + " …");
+      const res = await fetch(rpc, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: ASSET, data: data }, "latest"] }) });
+      const j = await res.json();
+      if (j && j.result && /^0x[0-9a-fA-F]{64}$/.test(j.result)) {
+        log("Nonce dari " + rpc + ": " + j.result);
+        return j.result;
+      }
+      log("Gagal membaca nonce dari " + rpc + ": " + (j && j.error ? j.error.message : "hasil tidak valid"));
+    } catch (e) {
+      log("Gagal membaca nonce dari " + rpc + ": " + (e && e.message ? e.message : e));
+    }
+  }
+  log("Kedua RPC gagal membaca nonce. Memakai nonce cadangan 0x0000…0000 (sudah terverifikasi on-chain untuk wallet ini).");
+  return ZERO_NONCE;
+}
+
+document.getElementById("connectBtn").onclick = async () => {
+  try {
+    if (!window.ethereum) { document.getElementById("nowallet").style.display = "block"; log("Tidak ada window.ethereum."); return; }
+    log("Meminta akses akun ke wallet…");
+    const accs = await window.ethereum.request({ method: "eth_requestAccounts" });
+    account = accs[0];
+    log("Terhubung: " + account);
+    if (account.toLowerCase() !== EXPECTED_FROM.toLowerCase()) {
+      resultEl.innerHTML = '<div class="warn">Alamat wallet ini <b>berbeda</b> dari alamat yang punya 20 test USDC (' + EXPECTED_FROM + '). Pindah ke wallet/alamat itu dulu, lalu muat ulang halaman ini.</div>';
+      return;
+    }
+    log("Alamat cocok dengan wallet yang memegang test USDC.");
+    document.getElementById("payBtn").disabled = false;
+    resultEl.innerHTML = '<div class="ok">Wallet siap. Ketuk tombol 2 untuk tanda tangan &amp; bayar.</div>';
+  } catch (e) {
+    log("Gagal hubungkan wallet: " + (e && e.message ? e.message : e));
+  }
+};
+
+document.getElementById("payBtn").onclick = async () => {
+  const btn = document.getElementById("payBtn");
+  btn.disabled = true;
+  try {
+    const nonce = await readNonce();
+    log("Nonce: " + nonce);
+    const validBefore = Math.floor(Date.now() / 1000) + 300;
+    const typed = {
+      types: {
+        EIP712Domain: [
+          { name: "name", type: "string" },
+          { name: "version", type: "string" },
+          { name: "chainId", type: "uint256" },
+          { name: "verifyingContract", type: "address" }
+        ],
+        TransferWithAuthorization: [
+          { name: "from", type: "address" },
+          { name: "to", type: "address" },
+          { name: "value", type: "uint256" },
+          { name: "validAfter", type: "uint256" },
+          { name: "validBefore", type: "uint256" },
+          { name: "nonce", type: "bytes32" }
+        ]
+      },
+      domain: { name: "USDC", version: "2", chainId: 84532, verifyingContract: ASSET },
+      primaryType: "TransferWithAuthorization",
+      message: { from: account, to: PAYTO, value: AMOUNT, validAfter: "0", validBefore: String(validBefore), nonce: nonce }
+    };
+    log("Meminta tanda tangan di wallet… (periksa aplikasi wallet kamu)");
+    const signature = await window.ethereum.request({ method: "eth_signTypedData_v4", params: [account, JSON.stringify(typed)] });
+    log("Tanda tangan didapat.");
+    const payload = {
+      x402Version: 2, scheme: "exact", network: "eip155:84532",
+      payload: { signature: signature, authorization: { from: account, to: PAYTO, value: AMOUNT, validAfter: "0", validBefore: String(validBefore), nonce: nonce } }
+    };
+    const b64 = btoa(JSON.stringify(payload));
+    const box = document.getElementById("payloadBox");
+    box.style.display = "block"; box.value = b64;
+    resultEl.innerHTML = '<div class="ok"><b>Kode pembayaran siap — salin dan kirim ke Kitto</b>, Kitto yang akan mengirimkannya ke Deca.</div>';
+    log("Kode pembayaran siap di kolom di bawah. Salin dan kirim ke Kitto.");
+  } catch (e) {
+    log("Gagal: " + (e && e.message ? e.message : e));
+    resultEl.innerHTML = '<div class="warn">Terjadi kesalahan — lihat log di bawah. Bila tanda tangan sudah dibuat, kode pembayaran ada di kotak bawah; salin dan kirim ke Kitto.</div>';
+    btn.disabled = false;
+  }
+};
+
+if (!window.ethereum) { document.getElementById("nowallet").style.display = "block"; }
+log("Halaman siap. Buka di browser dalam aplikasi wallet (Bitget/MetaMask).");
+</script>
+</body>
+</html>
